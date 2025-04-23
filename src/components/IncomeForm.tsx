@@ -2,6 +2,8 @@ import React from 'react';
 import { useSimulatorStore } from '@/store/simulator';
 import { Plus, Trash2 } from 'lucide-react';
 import { CategorySelect, INCOME_CATEGORIES } from '@/components/ui/category-select';
+// 直接インポートするように修正
+import { calculateNetIncome } from '@/lib/calculations';
 
 export function IncomeForm() {
   const { 
@@ -16,6 +18,53 @@ export function IncomeForm() {
     { length: basicInfo.deathAge - basicInfo.currentAge + 1 },
     (_, i) => basicInfo.startYear + i
   );
+
+  // 給与収入が手取り計算対象かどうか判定する関数
+  const isNetIncomeTarget = (itemName: string) => {
+    return (
+      (itemName === '給与収入' && 
+       (basicInfo.occupation === 'company_employee' || basicInfo.occupation === 'part_time_with_pension')) ||
+      (itemName === '配偶者収入' && basicInfo.spouseInfo?.occupation && 
+       (basicInfo.spouseInfo.occupation === 'company_employee' || basicInfo.spouseInfo.occupation === 'part_time_with_pension'))
+    );
+  };
+
+  // 入力フォーカスが外れたときのハンドラ - 手取り計算を行う
+  const handleAmountBlur = (
+    section: 'personal' | 'corporate',
+    itemId: string,
+    year: number,
+    value: number
+  ) => {
+    if (section === 'personal') {
+      const item = incomeData[section].find(i => i.id === itemId);
+      
+      // 給与収入で会社員または厚生年金ありのパートの場合のみ手取り計算を行う
+      if (item && isNetIncomeTarget(item.name)) {
+        // 職業を判断
+        const occupation = item.name === '給与収入' ? basicInfo.occupation : basicInfo.spouseInfo?.occupation;
+        
+        // 手取り計算
+        const netResult = calculateNetIncome(value, occupation);
+        const netIncome = netResult.netIncome;
+        
+        // 額面は_originalAmountsに保存、表示用のamountsは手取り額に更新
+        setIncomeData({
+          ...incomeData,
+          [section]: incomeData[section].map(i => {
+            if (i.id === itemId) {
+              return {
+                ...i,
+                _originalAmounts: { ...(i._originalAmounts || {}), [year]: value },
+                amounts: { ...(i.amounts || {}), [year]: netIncome }
+              };
+            }
+            return i;
+          })
+        });
+      }
+    }
+  };
 
   const handleAmountChange = (
     section: 'personal' | 'corporate',
@@ -226,9 +275,15 @@ export function IncomeForm() {
                         type="number"
                         value={item.amounts[year] || ''}
                         onChange={(e) => handleAmountChange(section, item.id, year, Number(e.target.value))}
+                        onBlur={(e) => handleAmountBlur(section, item.id, year, Number(e.target.value))}
                         className="w-full text-right rounded-md border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         placeholder="0"
                       />
+                      {isNetIncomeTarget(item.name) && item._originalAmounts && item._originalAmounts[year] > 0 && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          額面: {item._originalAmounts[year]}万円
+                        </div>
+                      )}
                     </td>
                   ))}
                   <td className="px-4 py-2 text-center">
@@ -272,6 +327,15 @@ export function IncomeForm() {
           各収入項目ごとに投資設定を行うことができます。投資割合(%)は収入のうち何%を投資に回すかを、
           最大投資額は年間いくらまで投資するかの上限を設定します。
           これらの設定は自動的に運用資産に反映され、設定した運用利回りで収益が発生します。
+        </p>
+      </div>
+
+      {/* 手取り計算の説明を常に表示 - section変数を使わない */}
+      <div className="bg-blue-50 p-4 rounded-md mb-4">
+        <h3 className="text-md font-medium text-blue-800 mb-2">手取り計算について</h3>
+        <p className="text-sm text-blue-700">
+          会社員・公務員（または厚生年金あり）の給与収入は、入力後自動的に手取り金額に変換されます。
+          元の額面金額は保存され、年金計算などに使用されます。
         </p>
       </div>
 
