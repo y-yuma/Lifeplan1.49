@@ -8,6 +8,8 @@ import {
   ASSET_CATEGORIES, 
   LIABILITY_CATEGORIES 
 } from '@/components/ui/category-select';
+// ES Modules形式でインポート
+import { calculateNetIncome } from '@/lib/calculations';
 
 function calculateAge(startYear: number, currentAge: number, targetYear: number) {
   return currentAge + (targetYear - startYear);
@@ -128,15 +130,7 @@ export function CashFlowForm() {
       const item = incomeData[section].find(i => i.id === itemId);
       
       // 給与収入で会社員または厚生年金ありのパートの場合のみ手取り計算を行う
-      if (item && (item.name === '給与収入' || item.name === '配偶者収入') && 
-         ((item.name === '給与収入' && 
-           (basicInfo.occupation === 'company_employee' || basicInfo.occupation === 'part_time_with_pension')) ||
-          (item.name === '配偶者収入' && basicInfo.spouseInfo?.occupation && 
-           (basicInfo.spouseInfo.occupation === 'company_employee' || basicInfo.spouseInfo.occupation === 'part_time_with_pension')))) {
-        
-        // 手取り計算を行う関数をインポート
-        const { calculateNetIncome } = require('@/lib/calculations');
-        
+      if (item && isNetIncomeTarget(item.name)) {
         // 職業を判断
         const occupation = item.name === '給与収入' ? basicInfo.occupation : basicInfo.spouseInfo?.occupation;
         
@@ -680,77 +674,77 @@ export function CashFlowForm() {
                 </>
               )}
               
-{/* 合計値 */}
-<tr className="bg-gray-50 font-medium">
-  <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">収支</td>
-  {years.map(year => {
-    const balance = cashFlow[year]?.personalBalance || 0;
-    return (
-      <td key={year} className={`px-4 py-2 text-right text-sm ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-        {balance}万円
-      </td>
-    );
-  })}
-</tr>
-<tr className="bg-gray-50 font-medium">
-  <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">投資額</td>
-  {years.map(year => {
-    const investmentAmount = cashFlow[year]?.investmentAmount || 0;
-    return (
-      <td key={year} className="px-4 py-2 text-right text-sm text-blue-600">
-        {investmentAmount}万円
-      </td>
-    );
-  })}
-</tr>
-<tr className="bg-gray-50 font-medium">
-  <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">運用資産</td>
-  {years.map(year => {
-    const investmentAssets = cashFlow[year]?.totalInvestmentAssets || 0;
-    return (
-      <td key={year} className="px-4 py-2 text-right text-sm text-blue-600">
-        {investmentAssets}万円
-      </td>
-    );
-  })}
-</tr>
-<tr className="bg-gray-50 font-medium">
-  <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">運用収益</td>
-  {years.map(year => {
-    const investmentIncome = cashFlow[year]?.investmentIncome || 0;
-    return (
-      <td key={year} className="px-4 py-2 text-right text-sm text-blue-600">
-        {investmentIncome}万円
-      </td>
-    );
-  })}
-</tr>
-<tr className="bg-gray-50 font-medium">
-  <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">総資産</td>
-  {years.map(year => {
-    const assets = cashFlow[year]?.personalTotalAssets || 0;
-    return (
-      <td key={year} className={`px-4 py-2 text-right text-sm ${assets >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-        {assets}万円
-      </td>
-    );
-  })}
-</tr>
-<tr className="bg-gray-50 font-medium">
-  <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">純資産</td>
-  {years.map(year => {
-    const totalAssets = cashFlow[year]?.personalTotalAssets || 0;
-    const liabilities = liabilityData.personal.reduce((total, liability) => {
-      return total + (liability.amounts[year] || 0);
-    }, 0);
-    const netAssets = totalAssets - liabilities;
-    return (
-      <td key={year} className={`px-4 py-2 text-right text-sm ${netAssets >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-        {netAssets}万円
-      </td>
-    );
-  })}
-</tr>
+              {/* 合計値 */}
+              <tr className="bg-gray-50 font-medium">
+                <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">収支</td>
+                {years.map(year => {
+                  const balance = cashFlow[year]?.personalBalance || 0;
+                  return (
+                    <td key={year} className={`px-4 py-2 text-right text-sm ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {balance}万円
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="bg-gray-50 font-medium">
+                <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">投資額</td>
+                {years.map(year => {
+                  const investmentAmount = cashFlow[year]?.investmentAmount || 0;
+                  return (
+                    <td key={year} className="px-4 py-2 text-right text-sm text-blue-600">
+                      {investmentAmount}万円
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="bg-gray-50 font-medium">
+                <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">運用資産</td>
+                {years.map(year => {
+                  const investmentAssets = cashFlow[year]?.totalInvestmentAssets || 0;
+                  return (
+                    <td key={year} className="px-4 py-2 text-right text-sm text-blue-600">
+                      {investmentAssets}万円
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="bg-gray-50 font-medium">
+                <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">運用収益</td>
+                {years.map(year => {
+                  const investmentIncome = cashFlow[year]?.investmentIncome || 0;
+                  return (
+                    <td key={year} className="px-4 py-2 text-right text-sm text-blue-600">
+                      {investmentIncome}万円
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="bg-gray-50 font-medium">
+                <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">総資産</td>
+                {years.map(year => {
+                  const assets = cashFlow[year]?.personalTotalAssets || 0;
+                  return (
+                    <td key={year} className={`px-4 py-2 text-right text-sm ${assets >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {assets}万円
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="bg-gray-50 font-medium">
+                <td className="px-4 py-2 text-sm text-gray-900 sticky left-0 bg-gray-50">純資産</td>
+                {years.map(year => {
+                  const totalAssets = cashFlow[year]?.personalTotalAssets || 0;
+                  const liabilities = liabilityData.personal.reduce((total, liability) => {
+                    return total + (liability.amounts[year] || 0);
+                  }, 0);
+                  const netAssets = totalAssets - liabilities;
+                  return (
+                    <td key={year} className={`px-4 py-2 text-right text-sm ${netAssets >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {netAssets}万円
+                    </td>
+                  );
+                })}
+              </tr>
             </tbody>
           </table>
         </div>
