@@ -550,7 +550,9 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => ({
     });
   },
 
-  syncCashFlowFromFormData: () => {
+ // src/store/simulator.ts ファイル内の syncCashFlowFromFormData 関数を修正
+
+syncCashFlowFromFormData: () => {
   try {
     const state = get();
     const { basicInfo, parameters, incomeData, expenseData, assetData, liabilityData } = state;
@@ -601,6 +603,16 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => ({
     // 自営業かどうかをチェック
     const isSelfEmployed = basicInfo.occupation === 'self_employed' || basicInfo.occupation === 'homemaker';
     
+    // 給与収入が手取り計算対象かどうか判定する関数
+    const isNetIncomeTarget = (itemName: string) => {
+      return (
+        (itemName === '給与収入' && 
+         (basicInfo.occupation === 'company_employee' || basicInfo.occupation === 'part_time_with_pension')) ||
+        (itemName === '配偶者収入' && basicInfo.spouseInfo?.occupation && 
+         (basicInfo.spouseInfo.occupation === 'company_employee' || basicInfo.spouseInfo.occupation === 'part_time_with_pension'))
+      );
+    };
+    
     // 年金関連項目を取得
     const pensionItem = findItem('年金収入');
     const spousePensionItem = findItem('配偶者年金収入');
@@ -612,33 +624,37 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => ({
       // 前年のデータを取得
       const prevYear = year - 1;
       
-      // 個人収入の計算 - 重要な修正: 会社員の場合は手取り額を表示するが計算は原本額面で
+      // 個人収入の計算 - 修正: 手取り計算済みの場合は再計算しない
       // 給与収入項目を取得
       const mainIncomeItem = findItem('給与収入');
       let mainIncome = 0;
       
       if (mainIncomeItem) {
-        if (!isSelfEmployed) {
-          // 会社員などの場合
-          // 手取り額が保存されている場合はそれを使用
-          if (mainIncomeItem._netAmounts && mainIncomeItem._netAmounts[year]) {
-            mainIncome = mainIncomeItem._netAmounts[year];
-          } else {
-            // 手取り額がない場合は額面から計算
-            const grossAmount = mainIncomeItem.amounts[year] || 0;
-            if (grossAmount > 0) {
-              const netResult = calculateNetIncome(grossAmount, basicInfo.occupation);
-              mainIncome = netResult.netIncome;
-            }
-          }
+        // 手取り計算対象（会社員など）の場合
+        if (isNetIncomeTarget(mainIncomeItem.name)) {
+          // すでに手取り計算済みなので、amounts（手取り額）をそのまま使用
+          mainIncome = mainIncomeItem.amounts[year] || 0;
         } else {
-          // 自営業の場合はそのまま
+          // 自営業などの場合はそのまま
           mainIncome = mainIncomeItem.amounts[year] || 0;
         }
       }
       
+      // 副業収入（通常手取り計算しない）
       const sideIncome = findItem('副業収入')?.amounts[year] || 0;
-      const spouseIncome = findItem('配偶者収入')?.amounts[year] || 0;
+      
+      // 配偶者収入 - 手取り計算対象の場合はamountsをそのまま使用
+      const spouseIncomeItem = findItem('配偶者収入');
+      let spouseIncome = 0;
+      if (spouseIncomeItem) {
+        if (isNetIncomeTarget(spouseIncomeItem.name)) {
+          // すでに手取り計算済み
+          spouseIncome = spouseIncomeItem.amounts[year] || 0;
+        } else {
+          // 自営業などの場合はそのまま
+          spouseIncome = spouseIncomeItem.amounts[year] || 0;
+        }
+      }
       
       // 年金額の計算 - 年齢に応じて自動計算
       let pensionIncome = 0;
@@ -648,9 +664,27 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => ({
       if (age >= (basicInfo.pensionStartAge || 65)) {
         // 自動計算フラグがある場合のみ計算
         if (pensionItem?.isAutoCalculated) {
-          // 年金計算関数を呼び出し - incomeDataをそのまま渡す
-          // 年金計算関数内部で原本額面データを優先的に使用
-          pensionIncome = calculatePensionForYear(basicInfo, incomeData, year);
+          // 年金計算関数を呼び出し - 修正: 額面データがある場合は優先使用
+          // 年金計算のために額面データ(_originalAmounts)を使用
+          if (mainIncomeItem && mainIncomeItem._originalAmounts) {
+            // 一時的に額面データをバックアップ
+            const tempAmounts = { ...mainIncomeItem.amounts };
+            
+            // 額面データを設定（年金計算用）
+            Object.keys(mainIncomeItem._originalAmounts).forEach(yearKey => {
+              mainIncomeItem.amounts[yearKey] = mainIncomeItem._originalAmounts[yearKey];
+            });
+            
+            // 年金計算（額面ベース）
+            pensionIncome = calculatePensionForYear(basicInfo, incomeData, year);
+            
+            // 元の手取りデータに戻す
+            mainIncomeItem.amounts = tempAmounts;
+          } else {
+            // 額面データがない場合は通常通り計算
+            pensionIncome = calculatePensionForYear(basicInfo, incomeData, year);
+          }
+          
           // 計算結果を保存
           pensionItem.amounts[year] = pensionIncome;
         } else if (pensionItem) {
@@ -662,8 +696,26 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => ({
       // 配偶者年金の計算
       if (basicInfo.maritalStatus !== 'single') {
         if (spousePensionItem?.isAutoCalculated) {
-          // 配偶者年金計算関数を呼び出し
-          spousePensionIncome = calculateSpousePensionForYear(basicInfo, incomeData, year);
+          // 配偶者年金計算関数を呼び出し - 修正: 額面データがある場合は優先使用
+          if (spouseIncomeItem && spouseIncomeItem._originalAmounts) {
+            // 一時的に額面データをバックアップ
+            const tempAmounts = { ...spouseIncomeItem.amounts };
+            
+            // 額面データを設定（年金計算用）
+            Object.keys(spouseIncomeItem._originalAmounts).forEach(yearKey => {
+              spouseIncomeItem.amounts[yearKey] = spouseIncomeItem._originalAmounts[yearKey];
+            });
+            
+            // 配偶者年金計算（額面ベース）
+            spousePensionIncome = calculateSpousePensionForYear(basicInfo, incomeData, year);
+            
+            // 元の手取りデータに戻す
+            spouseIncomeItem.amounts = tempAmounts;
+          } else {
+            // 額面データがない場合は通常通り計算
+            spousePensionIncome = calculateSpousePensionForYear(basicInfo, incomeData, year);
+          }
+          
           // 計算結果を保存
           spousePensionItem.amounts[year] = spousePensionIncome;
         } else if (spousePensionItem) {
@@ -687,26 +739,10 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => ({
       // 投資への振り分け額の計算
       let investmentAmount = 0;
       
-      // 収入ごとに投資額を計算（会社員の場合は手取りから投資）
+      // 収入ごとに投資額を計算
       incomeData.personal.forEach(incomeItem => {
-        let amount = 0;
-        
-        if (incomeItem.name === '給与収入' && !isSelfEmployed) {
-          // 会社員の場合は手取りから投資
-          if (incomeItem._netAmounts && incomeItem._netAmounts[year]) {
-            amount = incomeItem._netAmounts[year];
-          } else {
-            // 手取り額がなければ計算
-            const grossAmount = incomeItem.amounts[year] || 0;
-            if (grossAmount > 0) {
-              const netResult = calculateNetIncome(grossAmount, basicInfo.occupation);
-              amount = netResult.netIncome;
-            }
-          }
-        } else {
-          // それ以外の項目や自営業の場合はそのまま
-          amount = incomeItem.amounts[year] || 0;
-        }
+        // すでに手取り計算済みか、または額面のままか判断
+        const amount = incomeItem.amounts[year] || 0;
         
         if (amount > 0 && incomeItem.investmentRatio > 0) {
           // 投資割合に基づく投資額
